@@ -48,6 +48,12 @@ void runWindow()
       int PC_ReceivePipeSectorNumber = 8;
       WINDOW *PC_ReceivePipeSector[PC_ReceivePipeSectorNumber];
 
+      int R_SendPipeSectorNumber = 4;
+      WINDOW *R_SendPipeSector[R_SendPipeSectorNumber];
+
+      int R_ReceivePipeSectorNumber = 4;
+      WINDOW *R_ReceivePipeSector[R_ReceivePipeSectorNumber];
+
       int pcSizeX = 3;
       int pcSizeY = 6;
       int transferPipeSizeX = 6;
@@ -85,6 +91,19 @@ void runWindow()
       PC_ReceivePipeSector[6] = newwin(1, transferPipeSizeY, 3 + 2 * pcSizeX + 2 * transferPipeSizeX, 1 + 1 * pcSizeY + 0 * transferPipeSizeY);
       PC_ReceivePipeSector[7] = newwin(1, transferPipeSizeY, 3 + 1 * pcSizeX + 1 * transferPipeSizeX, 1 + 1 * pcSizeY + 0 * transferPipeSizeY);
 
+      R_SendPipeSector[0] = newwin(1, transferPipeSizeY, 1 + 1 * pcSizeX + 1 * transferPipeSizeX, 1 + 2 * pcSizeY + 1 * transferPipeSizeY);
+      R_SendPipeSector[1] = newwin(transferPipeSizeX, 1, 1 + 2 * pcSizeX + 1 * transferPipeSizeX, 2 + 2 * pcSizeY + 2 * transferPipeSizeY);
+      R_SendPipeSector[2] = newwin(1, transferPipeSizeY, 1 + 2 * pcSizeX + 2 * transferPipeSizeX, 1 + 2 * pcSizeY + 1 * transferPipeSizeY);
+      R_SendPipeSector[3] = newwin(transferPipeSizeX, 1, 1 + 2 * pcSizeX + 1 * transferPipeSizeX, 2 + 1 * pcSizeY + 1 * transferPipeSizeY);
+
+      R_ReceivePipeSector[0] = newwin(1, transferPipeSizeY, 3 + 1 * pcSizeX + 1 * transferPipeSizeX, 1 + 2 * pcSizeY + 1 * transferPipeSizeY);
+      R_ReceivePipeSector[1] = newwin(transferPipeSizeX, 1, 1 + 2 * pcSizeX + 1 * transferPipeSizeX, 5 + 2 * pcSizeY + 2 * transferPipeSizeY);
+      R_ReceivePipeSector[2] = newwin(1, transferPipeSizeY, 3 + 2 * pcSizeX + 2 * transferPipeSizeX, 1 + 2 * pcSizeY + 1 * transferPipeSizeY);
+      R_ReceivePipeSector[3] = newwin(transferPipeSizeX, 1, 1 + 2 * pcSizeX + 1 * transferPipeSizeX, 5 + 1 * pcSizeY + 1 * transferPipeSizeY);
+      // R_SendPipeSector[1] = newwin(pcSizeX, pcSizeY, 1 + 1 * pcSizeX + 1 * transferPipeSizeX, 1 + 2 * pcSizeY + 2 * transferPipeSizeY);
+      // R_SendPipeSector[2] = newwin(pcSizeX, pcSizeY, 1 + 2 * pcSizeX + 2 * transferPipeSizeX, 1 + 2 * pcSizeY + 2 * transferPipeSizeY);
+      // R_SendPipeSector[3] = newwin(pcSizeX, pcSizeY, 1 + 2 * pcSizeX + 2 * transferPipeSizeX, 1 + 1 * pcSizeY + 1 * transferPipeSizeY);
+
       for (int i = 0; i < pcSectorNumber; i++)
       {
             wbkgd(PC_sector[i], COLOR_PAIR(2));
@@ -103,14 +122,22 @@ void runWindow()
       for (int i = 0; i < PC_SendPipeSectorNumber; i++)
       {
             wbkgd(PC_SendPipeSector[i], COLOR_PAIR(4));
-            wbkgd(PC_ReceivePipeSector[i], COLOR_PAIR(5));
-
             mvwprintw(PC_SendPipeSector[i], 0, 0, "aaaaaaaa");
       }
       for (int i = 0; i < PC_ReceivePipeSectorNumber; i++)
       {
             wbkgd(PC_ReceivePipeSector[i], COLOR_PAIR(5));
             mvwprintw(PC_ReceivePipeSector[i], 0, 0, "bbbbbbbbb");
+      }
+      for (int i = 0; i < R_SendPipeSectorNumber; i++)
+      {
+            wbkgd(R_SendPipeSector[i], COLOR_PAIR(4));
+            mvwprintw(R_SendPipeSector[i], 0, 0, "ccccccccc");
+      }
+      for (int i = 0; i < R_ReceivePipeSectorNumber; i++)
+      {
+            wbkgd(R_ReceivePipeSector[i], COLOR_PAIR(5));
+            mvwprintw(R_ReceivePipeSector[i], 0, 0, "ddddddd");
       }
 
       WINDOW *progress_bar = newwin(15, 1, 5, 0);
@@ -150,6 +177,14 @@ void runWindow()
             {
                   wrefresh(PC_ReceivePipeSector[i]);
             }
+            for (int i = 0; i < R_SendPipeSectorNumber; i++)
+            {
+                  wrefresh(R_SendPipeSector[i]);
+            }
+            for (int i = 0; i < R_ReceivePipeSectorNumber; i++)
+            {
+                  wrefresh(R_ReceivePipeSector[i]);
+            }
       }
 
       delwin(progress_bar);
@@ -170,6 +205,14 @@ void runWindow()
       for (int i = 0; i < PC_ReceivePipeSectorNumber; i++)
       {
             delwin(PC_ReceivePipeSector[i]);
+      }
+      for (int i = 0; i < R_SendPipeSectorNumber; i++)
+      {
+            delwin(R_SendPipeSector[i]);
+      }
+      for (int i = 0; i < R_ReceivePipeSectorNumber; i++)
+      {
+            delwin(R_ReceivePipeSector[i]);
       }
 }
 int main()

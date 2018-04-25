@@ -4,3 +4,4 @@ program
 .vscode/settings.json
 tutori/demo
 tutori/demo.c
+tutori/Makefile
