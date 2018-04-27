@@ -6,17 +6,15 @@
 #include <atomic>
 #include <ncurses.h>
 #include <vector>
+#include <queue>
+#include <algorithm>
 #include <iterator>
 #include <iostream>
 #include <sstream>
 using namespace std;
 
-atomic<bool> endFlag(false);
-bool nCursesEndFlag = false;
-int appTime = 0;
-
 //config
-const int PC = 8;
+const int PC = 1;
 const int R = 4;
 const int RPCP = 8;
 const int BPCP = 8;
@@ -24,21 +22,123 @@ const int RRP = 4;
 const int BRP = 4;
 const int PLIMIT = 10;
 //
+class Packet;
+void Send(Packet &);
+void PrintToConsole(string);
+
+atomic<bool> endFlag(false);
+atomic<int> packetId(0);
+
+bool nCursesEndFlag = false;
+int appTime = 0;
 
 string redPcPipeLine[RPCP];
+mutex redPcPipeLineMutex[RPCP];
 string bluePcPipeLine[BPCP];
+mutex bluePcPipeLineMutex[BPCP];
 string redRPipeLine[RRP];
+mutex redRPipeLineMutex[RRP];
 string blueRPipeLine[BRP];
+mutex blueRPipeLineMutex[BRP];
 
-//thread packet[PLIMIT];
-vector<thread> packet;
-vector<string> console;
+vector<thread> packetThreads;
 mutex consoleInput;
 mutex packetGen;
 
+vector<string> console;
+vector<Packet> packetList;
+queue<Packet *> buffer[R];
+mutex bufferMutex[R];
+
+pthread_cond_t routerCond[R];
+pthread_mutex_t routerMutex[R];
+//pthread_cond_t routerCond = PTHREAD_COND_INITIALIZER;
+//pthread_mutex_t routerMutex = PTHREAD_MUTEX_INITIALIZER;
+
+enum pos2
+{
+      pc,
+      r
+};
+enum pos1
+{
+      red,
+      blue
+};
+enum status
+{
+      created,
+      inPipe,
+      inRouter,
+};
+
+class Packet
+{
+    public:
+      int _id;
+      int _source;
+      int _destination;
+      int _position[3];
+      int _status;
+      string _message;
+      Packet(int source, int destination)
+      {
+            _id = packetId;
+            packetId++;
+            _source = source;
+            _position[2] = pc;     // 0 - PC, 1 - R
+            _position[1] = blue;    // 0 - red, 1 - blue
+            _position[0] = source; // line number
+            _destination = destination;
+            _status = created;
+      }
+      void PacketRun(string message)
+      {
+            // while (true)
+            {
+            _id = 654;
+                  _message = message;
+                  PrintToConsole("Packet created, id: " +  to_string(_id) + " source: " + to_string(_source) + " destination: " + to_string(_destination));
+                  if (_status == created)
+                  {
+
+                        //mvprintw(2, 1, "this: %p", this);
+                        //Packet * self = this;
+                        //      Send(*self);
+                        _position[2] = 5;
+                        mvprintw(3, 1, "send: %p", this);
+                        if (_position[2] == pc)
+                        {
+                              if (_position[1] == red)
+                              {
+                                    redPcPipeLineMutex[_position[0]].lock();
+                                    int initPos = _position[0];
+                                    redPcPipeLine[initPos] = _message;
+                                    _status = inPipe;
+                                    this_thread::sleep_for(chrono::milliseconds(3000));
+                                    bufferMutex[initPos / 2].lock();
+                                    buffer[initPos / 2].push(this);
+                                    _status = inRouter;
+                                    bufferMutex[initPos / 2].unlock();
+                                    pthread_mutex_lock(&routerMutex[initPos / 2]);
+                                    pthread_cond_signal(&routerCond[initPos / 2]);
+                                    pthread_mutex_unlock(&routerMutex[initPos / 2]);
+
+                                    redPcPipeLine[initPos] = "____________________";
+                                    redPcPipeLineMutex[initPos].unlock();
+                              }
+                        }
+                  }
+            }
+      }
+};
 
 void runWindow()
 {
+
+      int parent_x, parent_y, new_x, new_y;
+
+      getmaxyx(stdscr, parent_y, parent_x);
       int _progress = 1;
       initscr();
       if (has_colors() == FALSE)
@@ -140,46 +240,55 @@ void runWindow()
             for (int i = 0; i < PC_SendPipeSectorNumber; i++)
             {
                   wbkgd(PC_SendPipeSector[i], COLOR_PAIR(4));
-                  //string text = redPcPipeLine[i].;
-                  mvwprintw(PC_SendPipeSector[i], 0, 0, redPcPipeLine[i].c_str());
             }
             for (int i = 0; i < PC_ReceivePipeSectorNumber; i++)
             {
                   wbkgd(PC_ReceivePipeSector[i], COLOR_PAIR(5));
-                  mvwprintw(PC_ReceivePipeSector[i], 0, 0, bluePcPipeLine[i].c_str());
             }
             for (int i = 0; i < R_SendPipeSectorNumber; i++)
             {
                   wbkgd(R_SendPipeSector[i], COLOR_PAIR(4));
-                  mvwprintw(R_SendPipeSector[i], 0, 0, redRPipeLine[i].c_str());
             }
             for (int i = 0; i < R_ReceivePipeSectorNumber; i++)
             {
                   wbkgd(R_ReceivePipeSector[i], COLOR_PAIR(5));
-                  mvwprintw(R_ReceivePipeSector[i], 0, 0, redRPipeLine[i].c_str());
             }
       }
-
       WINDOW *consoleLog = newwin(50, 50, 1, 70);
-
-      std::ostringstream consoleString;
-      copy(console.begin(),console.end(), ostream_iterator<string>(consoleString,"\n"));
-      mvwprintw(consoleLog, 0, 0, consoleString.str().c_str());
-
+      WINDOW *stats = newwin(50, 50, 1, 120);
       WINDOW *progress_bar = newwin(15, 1, 5, 0);
-      wrefresh(progress_bar);
 
       {
             while (!nCursesEndFlag)
             {
-                  //cursesRefresh();
-                  this_thread::sleep_for(chrono::milliseconds(1000));
+
+                  refresh();
+                  this_thread::sleep_for(chrono::milliseconds(100));
+
+                  mvwprintw(stats, 0, 0, "Packet amount: %d", packetThreads.size());
+                  for (int i = 0; i < 4; i++)
+                  {
+                        mvwprintw(stats, 1 + i, 0, "Router %d, buffer elements: %d", i, buffer[i].size());
+                  }
+
+                  for (int i = 0; i < packetList.size(); i++)
+                  {
+                        mvwprintw(stats, 5 + i, 0, "Packet %d, pos: %d:%d:%d", packetList[i]._id, packetList[i]._position[2], packetList[i]._position[1], packetList[i]._position[0]);
+                  }
+
                   wresize(progress_bar, _progress, 1);
-                  wclear(stdscr);
-                  wclear(progress_bar);
+                  appTime += 1000;
+
+                  mvprintw(1, 1, "Time: %d", appTime);
                   _progress += 1;
                   wbkgd(progress_bar, COLOR_PAIR(2));
                   wrefresh(progress_bar);
+                  std::ostringstream consoleString;
+                  copy(console.begin(), console.end(), ostream_iterator<string>(consoleString, "\n"));
+                  mvwprintw(consoleLog, 0, 0, consoleString.str().c_str());
+
+                  wrefresh(consoleLog);
+                  wrefresh(stats);
                   if (_progress > 15)
                   {
 
@@ -188,7 +297,6 @@ void runWindow()
                         _progress = 1;
                   }
 
-                  wrefresh(consoleLog);
                   for (int i = 0; i < pcSectorNumber; i++)
                   {
                         wrefresh(PC_sector[i]);
@@ -199,24 +307,30 @@ void runWindow()
                   }
                   for (int i = 0; i < PC_SendPipeSectorNumber; i++)
                   {
+
+                        mvwprintw(PC_SendPipeSector[i], 0, 0, redPcPipeLine[i].c_str());
                         wrefresh(PC_SendPipeSector[i]);
                   }
                   for (int i = 0; i < PC_ReceivePipeSectorNumber; i++)
                   {
+                        mvwprintw(PC_ReceivePipeSector[i], 0, 0, bluePcPipeLine[i].c_str());
                         wrefresh(PC_ReceivePipeSector[i]);
                   }
                   for (int i = 0; i < R_SendPipeSectorNumber; i++)
                   {
+                        mvwprintw(R_SendPipeSector[i], 0, 0, redRPipeLine[i].c_str());
                         wrefresh(R_SendPipeSector[i]);
                   }
                   for (int i = 0; i < R_ReceivePipeSectorNumber; i++)
                   {
+                        mvwprintw(R_ReceivePipeSector[i], 0, 0, redRPipeLine[i].c_str());
                         wrefresh(R_ReceivePipeSector[i]);
                   }
             }
 
             delwin(progress_bar);
             delwin(consoleLog);
+            delwin(stats);
 
             for (int i = 0; i < pcSectorNumber; i++)
             {
@@ -248,45 +362,138 @@ void runWindow()
 
 void PrintToConsole(string text)
 {
-      // console = text + "\n" + console;
       consoleInput.lock();
-      //console.
-      if(console.size() > 30) console.erase(console.begin()); 
+      if (console.size() > 30)
+            console.erase(console.begin());
       console.push_back(text);
       consoleInput.unlock();
 }
 
-void Packet(int PCid)
+void Send(Packet &packet)
 {
-      PrintToConsole("Packet from " + to_string(PCid) + " is active");
+      /*    if (packet._status = -1)
+      {
+            redPcPipeLineMutex[packet._position].lock();
+            redPcPipeLine[packet._position] = packet._message;
+            packet._position = 
+            redPcPipeLineMutex[packet._position].unlock();
+      }
+      */
+      // packet._message = "saf";
+      packet._position[2] = 5;
+      mvprintw(3, 1, "send: %p", &packet);
+      if (packet._position[2] == pc)
+      {
+            if (packet._position[1] == red)
+            {
+                  redPcPipeLineMutex[packet._position[0]].lock();
+                  int initPos = packet._position[0];
+                  redPcPipeLine[initPos] = packet._message;
+                  packet._status = inPipe;
+                  this_thread::sleep_for(chrono::milliseconds(3000));
+                  bufferMutex[initPos / 2].lock();
+                  buffer[initPos / 2].push(&packet);
+                  packet._status = inRouter;
+                  bufferMutex[initPos / 2].unlock();
+                  pthread_mutex_lock(&routerMutex[initPos / 2]);
+                  pthread_cond_signal(&routerCond[initPos / 2]);
+                  pthread_mutex_unlock(&routerMutex[initPos / 2]);
+
+                  redPcPipeLine[initPos] = "____________________";
+                  redPcPipeLineMutex[initPos].unlock();
+            }
+      }
 }
 
 void GenerateNewPacket(int id)
 {
       packetGen.lock();
-      packet.push_back(thread(Packet, id));
+      packetList.push_back(*(new Packet(id, 1)));
+      packetThreads.push_back(thread(&Packet::PacketRun, packetList.back(), "abc " + to_string(id)));
       packetGen.unlock();
-      PrintToConsole("Packet generated by PC " + to_string(id));
 }
 
 void Pc(int id)
 {
-      PrintToConsole("PC " + to_string(id) + " is running");
+      PrintToConsole("PC " + to_string(id) + " initialized");
 
-
-      while(!endFlag)
+      while (!endFlag)
       {
-
-      PrintToConsole("test");
-      GenerateNewPacket(id);
-      this_thread::sleep_for(chrono::milliseconds(1000));
+            this_thread::sleep_for(chrono::milliseconds(10000));
+            GenerateNewPacket(id);
       }
 }
 
-void Router(int id)
+class Router
 {
-      PrintToConsole("Router " + to_string(id) + " is running");
-}
+    public:
+      int _id;
+      int _host[2];
+      Router(int id, int host0, int host1)
+      {
+            _id = id;
+            _host[0] = host0;
+            _host[1] = host1;
+      }
+      void RouterRun()
+      {
+            PrintToConsole("Router " + to_string(_id) + " initialized");
+            while (!endFlag)
+            {
+                  pthread_mutex_lock(&routerMutex[_id]);
+                  PrintToConsole("Router " + to_string(_id) + " is sleeping");
+                  pthread_cond_wait(&routerCond[_id], &routerMutex[_id]);
+                  PrintToConsole("Router " + to_string(_id) + " awake");
+                  while (buffer[_id].size() > 0)
+                  {
+
+                        bufferMutex[_id].lock();
+                        Packet *packet = buffer[_id].front();
+                        buffer[_id].pop();
+
+                        bufferMutex[_id].unlock();
+                        if ((*packet)._position[2] == pc &&
+                            (*packet)._position[1] == red &&
+                            ((*packet)._position[1] == _host[0] ||
+                             (*packet)._position[1] == _host[1]))
+                        {
+                              if ((*packet)._destination == _host[0])
+                              {
+                                    // wyślij na host 0
+
+                                    (*packet)._position[2] = r;
+                                    (*packet)._position[1] = blue;
+                                    (*packet)._position[0] = _host[0];
+                              }
+                              else if ((*packet)._destination == _host[1])
+                              {
+                                    // wyślij na host 1
+
+                                    (*packet)._position[2] = r;
+                                    (*packet)._position[1] = blue;
+                                    (*packet)._position[0] = _host[1];
+                                    //mvprintw(2, 1, "test: %p", *packet);
+                              }
+                              else
+                              {
+                                    //wyślij w prawo
+                                    // usun
+                                    //packetGen.lock();
+                                    //auto it = find(packetThreads.begin(), packetThreads.end(), (*packet));
+                                    // if (it != packetThreads.end())
+                                    {
+                                          // packetThreads[distance(packetThreads.begin(),it)].join();
+                                          //     packetThreads.erase(it);
+                                    }
+                                    //packetGen.unlock();
+                              }
+                              //Send(*packet);
+                        }
+                  }
+                  pthread_mutex_unlock(&routerMutex[_id]);
+            }
+      }
+};
 
 int main()
 {
@@ -304,15 +511,20 @@ int main()
             pc[i] = thread(Pc, i);
       }
       PrintToConsole("SYSTEM: Starting Routers...");
-      thread router[R];
+      thread threadRouter[R];
+      Router router[4] = {
+          Router(0, 0, 1),
+          Router(1, 2, 3),
+          Router(2, 4, 5),
+          Router(3, 6, 7),
+      };
       for (int i = 0; i < R; i++)
       {
-            router[i] = thread(Router, i);
+            threadRouter[i] = thread(&Router::RouterRun, router[i]);
       }
       getchar();
 
       endFlag = true;
-
 
       PrintToConsole("SYSTEM: shutdown PCs...");
       for (int i = 0; i < PC; i++)
@@ -320,17 +532,21 @@ int main()
             pc[i].join();
       };
 
+      PrintToConsole("SYSTEM: shutdown Packets...");
+      for (int i = 0; i < packetThreads.size(); i++)
+      {
+            packetThreads[i].join();
+      };
+
       PrintToConsole("SYSTEM: shutdown Routers...");
       for (int i = 0; i < R; i++)
       {
-            router[i].join();
+            pthread_mutex_lock(&routerMutex[i]);
+            pthread_cond_signal(&routerCond[i]);
+            pthread_mutex_unlock(&routerMutex[i]);
+            threadRouter[i].join();
       };
 
-            PrintToConsole("SYSTEM: shutdown Packets...");
-      for (int i = 0; i < packet.size(); i++)
-      {
-            packet[i].join();
-      };
       nCursesEndFlag = true;
       window.join();
       endwin();
