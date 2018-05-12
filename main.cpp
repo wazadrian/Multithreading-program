@@ -14,16 +14,17 @@
 using namespace std;
 
 //config
-const int PC = 1;
+const int PC = 8;
 const int R = 4;
 const int RPCP = 8;
 const int BPCP = 8;
 const int RRP = 4;
 const int BRP = 4;
 const int PLIMIT = 10;
+const int DELAY = 3;
 //
 class Packet;
-void Send(Packet &);
+int Send(int, string);
 void PrintToConsole(string);
 
 atomic<bool> endFlag(false);
@@ -44,32 +45,32 @@ mutex blueRPipeLineMutex[BRP];
 vector<thread> packetThreads;
 mutex consoleInput;
 mutex packetGen;
+mutex uniqueIdGen;
 
 vector<string> console;
 vector<Packet> packetList;
-queue<Packet *> buffer[R];
+queue<int> buffer[R];
+bool routerActive[4];
 mutex bufferMutex[R];
 
 pthread_cond_t routerCond[R];
 pthread_mutex_t routerMutex[R];
-//pthread_cond_t routerCond = PTHREAD_COND_INITIALIZER;
-//pthread_mutex_t routerMutex = PTHREAD_MUTEX_INITIALIZER;
+
+int packetPosition[300][3];
+int routerPacketId[4];
+int routerProgress[4];
+string routerPacketMsg[4];
 
 enum pos2
 {
       pc,
-      r
+      r,
+      lost
 };
 enum pos1
 {
       red,
       blue
-};
-enum status
-{
-      created,
-      inPipe,
-      inRouter,
 };
 
 class Packet
@@ -78,54 +79,31 @@ class Packet
       int _id;
       int _source;
       int _destination;
-      int _position[3];
-      int _status;
       string _message;
-      Packet(int source, int destination)
+      Packet(int source, int destination, string message)
       {
+            uniqueIdGen.lock();
             _id = packetId;
             packetId++;
+            uniqueIdGen.unlock();
             _source = source;
-            _position[2] = pc;     // 0 - PC, 1 - R
-            _position[1] = blue;    // 0 - red, 1 - blue
-            _position[0] = source; // line number
+            packetPosition[_id][2] = pc;     // 0 - PC, 1 - R
+            packetPosition[_id][1] = red;    // 0 - red, 1 - blue
+            packetPosition[_id][0] = source; // line number
             _destination = destination;
-            _status = created;
+            _message = message;
       }
-      void PacketRun(string message)
+      void PacketRun()
       {
-            // while (true)
             {
-            _id = 654;
-                  _message = message;
-                  PrintToConsole("Packet created, id: " +  to_string(_id) + " source: " + to_string(_source) + " destination: " + to_string(_destination));
-                  if (_status == created)
+                  PrintToConsole("Packet created, id: " + to_string(_id) + " source: " + to_string(_source) + " destination: " + to_string(_destination));
+                  if (packetPosition[_id][2] == pc)
                   {
-
-                        //mvprintw(2, 1, "this: %p", this);
-                        //Packet * self = this;
-                        //      Send(*self);
-                        _position[2] = 5;
-                        mvprintw(3, 1, "send: %p", this);
-                        if (_position[2] == pc)
+                        if (packetPosition[_id][1] == red)
                         {
-                              if (_position[1] == red)
+                              if (Send(_id, (to_string(_id) + " " +_message)) == -1)
                               {
-                                    redPcPipeLineMutex[_position[0]].lock();
-                                    int initPos = _position[0];
-                                    redPcPipeLine[initPos] = _message;
-                                    _status = inPipe;
-                                    this_thread::sleep_for(chrono::milliseconds(3000));
-                                    bufferMutex[initPos / 2].lock();
-                                    buffer[initPos / 2].push(this);
-                                    _status = inRouter;
-                                    bufferMutex[initPos / 2].unlock();
-                                    pthread_mutex_lock(&routerMutex[initPos / 2]);
-                                    pthread_cond_signal(&routerCond[initPos / 2]);
-                                    pthread_mutex_unlock(&routerMutex[initPos / 2]);
-
-                                    redPcPipeLine[initPos] = "____________________";
-                                    redPcPipeLineMutex[initPos].unlock();
+                                    PrintToConsole("Packet sent but router failed.");
                               }
                         }
                   }
@@ -156,6 +134,7 @@ void runWindow()
       init_pair(3, COLOR_BLACK, COLOR_BLUE);
       init_pair(4, COLOR_WHITE, COLOR_RED);
       init_pair(5, COLOR_BLACK, COLOR_CYAN);
+      init_pair(6, COLOR_WHITE, COLOR_BLUE);
 
       int pcSectorNumber = PC;
       WINDOW *PC_sector[pcSectorNumber];
@@ -216,12 +195,12 @@ void runWindow()
             R_SendPipeSector[1] = newwin(transferPipeSizeX, 1, 1 + 2 * pcSizeX + 1 * transferPipeSizeX, 2 + 2 * pcSizeY + 2 * transferPipeSizeY);
             R_SendPipeSector[2] = newwin(1, transferPipeSizeY, 1 + 2 * pcSizeX + 2 * transferPipeSizeX, 1 + 2 * pcSizeY + 1 * transferPipeSizeY);
             R_SendPipeSector[3] = newwin(transferPipeSizeX, 1, 1 + 2 * pcSizeX + 1 * transferPipeSizeX, 2 + 1 * pcSizeY + 1 * transferPipeSizeY);
-
+            /*
             R_ReceivePipeSector[0] = newwin(1, transferPipeSizeY, 3 + 1 * pcSizeX + 1 * transferPipeSizeX, 1 + 2 * pcSizeY + 1 * transferPipeSizeY);
             R_ReceivePipeSector[1] = newwin(transferPipeSizeX, 1, 1 + 2 * pcSizeX + 1 * transferPipeSizeX, 5 + 2 * pcSizeY + 2 * transferPipeSizeY);
             R_ReceivePipeSector[2] = newwin(1, transferPipeSizeY, 3 + 2 * pcSizeX + 2 * transferPipeSizeX, 1 + 2 * pcSizeY + 1 * transferPipeSizeY);
             R_ReceivePipeSector[3] = newwin(transferPipeSizeX, 1, 1 + 2 * pcSizeX + 1 * transferPipeSizeX, 5 + 1 * pcSizeY + 1 * transferPipeSizeY);
-
+            */
             for (int i = 0; i < pcSectorNumber; i++)
             {
                   wbkgd(PC_sector[i], COLOR_PAIR(2));
@@ -232,10 +211,12 @@ void runWindow()
 
             for (int i = 0; i < routerSectorNumber; i++)
             {
+                  routerActive[i] = false;
                   wbkgd(R_sector[i], COLOR_PAIR(3));
-                  string rname = "R ";
+                  string rname = "R";
                   rname.append(to_string(i));
-                  mvwprintw(R_sector[i], 1, 1, rname.c_str());
+                  mvwprintw(R_sector[i], 0, 4, "0%%");
+                  mvwprintw(R_sector[i], 0, 0, rname.c_str());
             }
             for (int i = 0; i < PC_SendPipeSectorNumber; i++)
             {
@@ -273,7 +254,31 @@ void runWindow()
 
                   for (int i = 0; i < packetList.size(); i++)
                   {
-                        mvwprintw(stats, 5 + i, 0, "Packet %d, pos: %d:%d:%d", packetList[i]._id, packetList[i]._position[2], packetList[i]._position[1], packetList[i]._position[0]);
+                        //mvwprintw(stats, 5 + i, 0, "Packet %d, pos: %d:%d:%d", packetList[i]._id, packetPosition[i][2], packetPosition[i][1], packetPosition[i][0]);
+                        string status = "Unknown";  
+                        if(packetPosition[i][2]==lost)
+                        {
+                              status = "packet has been lost";
+                        }                       
+                        if(packetPosition[i][2]==pc && packetPosition[i][1]==blue)
+                        {
+                              status = "is near finish";
+                        }
+                        else if(packetPosition[i][2]==r)
+                        {
+                              status = "just left Rout";
+                        }
+                        else if(packetPosition[i][2]==pc)
+                        {
+                              status = "just left PC";
+                        }
+                        else if(packetPosition[i][2] == 9)
+                        {
+                              status = "Delivered to " + to_string(packetPosition[i][0]);
+                        }
+
+                        string msg = "Packet id:" + to_string(packetList[i]._id) + ", status: " + status;
+                        mvwprintw(stats, 5 + i, 0, msg.c_str());
                   }
 
                   wresize(progress_bar, _progress, 1);
@@ -303,6 +308,18 @@ void runWindow()
                   }
                   for (int i = 0; i < routerSectorNumber; i++)
                   {
+                        if (routerActive[i])
+                        {
+                              wbkgd(R_sector[i], COLOR_PAIR(6));
+                        }
+                        else
+                        {
+                              wbkgd(R_sector[i], COLOR_PAIR(3));
+                        }
+                        mvwprintw(R_sector[i], 0, 3, to_string(routerProgress[i]).c_str());
+                        mvwprintw(R_sector[i], 1, 0, "  ");
+                        mvwprintw(R_sector[i], 1, 0, to_string(routerPacketId[i]).c_str());
+                        mvwprintw(R_sector[i], 2, 0, routerPacketMsg[i].c_str());
                         wrefresh(R_sector[i]);
                   }
                   for (int i = 0; i < PC_SendPipeSectorNumber; i++)
@@ -323,7 +340,7 @@ void runWindow()
                   }
                   for (int i = 0; i < R_ReceivePipeSectorNumber; i++)
                   {
-                        mvwprintw(R_ReceivePipeSector[i], 0, 0, redRPipeLine[i].c_str());
+                        mvwprintw(R_ReceivePipeSector[i], 0, 0, blueRPipeLine[i].c_str());
                         wrefresh(R_ReceivePipeSector[i]);
                   }
             }
@@ -369,47 +386,100 @@ void PrintToConsole(string text)
       consoleInput.unlock();
 }
 
-void Send(Packet &packet)
+int Send(int packetId, string message)
 {
-      /*    if (packet._status = -1)
+      if (packetPosition[packetId][2] == pc)
       {
-            redPcPipeLineMutex[packet._position].lock();
-            redPcPipeLine[packet._position] = packet._message;
-            packet._position = 
-            redPcPipeLineMutex[packet._position].unlock();
-      }
-      */
-      // packet._message = "saf";
-      packet._position[2] = 5;
-      mvprintw(3, 1, "send: %p", &packet);
-      if (packet._position[2] == pc)
-      {
-            if (packet._position[1] == red)
+            if (packetPosition[packetId][1] == red)
             {
-                  redPcPipeLineMutex[packet._position[0]].lock();
-                  int initPos = packet._position[0];
-                  redPcPipeLine[initPos] = packet._message;
-                  packet._status = inPipe;
-                  this_thread::sleep_for(chrono::milliseconds(3000));
-                  bufferMutex[initPos / 2].lock();
-                  buffer[initPos / 2].push(&packet);
-                  packet._status = inRouter;
-                  bufferMutex[initPos / 2].unlock();
-                  pthread_mutex_lock(&routerMutex[initPos / 2]);
-                  pthread_cond_signal(&routerCond[initPos / 2]);
-                  pthread_mutex_unlock(&routerMutex[initPos / 2]);
-
-                  redPcPipeLine[initPos] = "____________________";
-                  redPcPipeLineMutex[initPos].unlock();
+                  if (redPcPipeLineMutex[packetPosition[packetId][0]].try_lock())
+                  {
+                        int initPos = packetPosition[packetId][0];
+                        redPcPipeLine[initPos] = message;
+                        this_thread::sleep_for(chrono::seconds(DELAY));
+                        if (bufferMutex[(initPos % 7 + 1) / 2].try_lock())
+                        {
+                              buffer[(initPos % 7 + 1) / 2].push(packetId);
+                              bufferMutex[(initPos % 7 + 1) / 2].unlock();
+                        }
+                        else
+                        {
+                              PrintToConsole("Red Pc pipeline " + to_string(packetId) + " couldn't access buffer");
+                              packetPosition[packetId][2] = lost;
+                        }
+                        redPcPipeLine[initPos] = "            ";
+                        redPcPipeLineMutex[initPos].unlock();
+                  }
+                  else
+                  {
+                        PrintToConsole("Packet " + to_string(packetId) + " lost");
+                        packetPosition[packetId][2] = lost;
+                  }
+            }
+            else if (packetPosition[packetId][1] == blue)
+            {
+                  if (bluePcPipeLineMutex[packetPosition[packetId][0]].try_lock())
+                  {
+                        int initPos = packetPosition[packetId][0];
+                        bluePcPipeLine[initPos] = message;
+                        this_thread::sleep_for(chrono::seconds(DELAY));
+                        bluePcPipeLine[initPos] = "            ";
+                        bluePcPipeLineMutex[initPos].unlock();
+                        PrintToConsole("PC " +
+                                       to_string(packetPosition[packetId][0]) +
+                                       " received packet id:" +
+                                       message);
+                        packetPosition[packetId][2] = 9;
+                        packetPosition[packetId][1] = 9;
+                  }
+                  else
+                  {
+                        PrintToConsole("Packet " + to_string(packetId) + " lost");
+                        packetPosition[packetId][2] = lost;
+                  }
             }
       }
+      else if (packetPosition[packetId][2] == r)
+      {
+            if (packetPosition[packetId][1] == red)
+            {
+                  if (redRPipeLineMutex[packetPosition[packetId][0]].try_lock())
+                  {
+                        int initPos = packetPosition[packetId][0];
+                        redRPipeLine[initPos] = message;
+                        this_thread::sleep_for(chrono::seconds(DELAY));
+                        if (bufferMutex[(initPos + 1) % 4].try_lock())
+                        {
+                              buffer[(initPos + 1) % 4].push(packetId);
+                              bufferMutex[(initPos + 1) % 4].unlock();
+                        }
+                        else
+                        {
+                              PrintToConsole("Pipeline " + to_string(initPos) + " couldn't get access to buffer");
+                              packetPosition[packetId][2] = lost;
+                        }
+                        redRPipeLine[initPos] = "            ";
+                        redRPipeLineMutex[initPos].unlock();
+                  }
+                  else
+                  {
+                        PrintToConsole("Packet " + to_string(packetId) + " lost");
+                        packetPosition[packetId][2] = lost;
+                  }
+            }
+      }
+      return 0;
 }
 
 void GenerateNewPacket(int id)
 {
       packetGen.lock();
-      packetList.push_back(*(new Packet(id, 1)));
-      packetThreads.push_back(thread(&Packet::PacketRun, packetList.back(), "abc " + to_string(id)));
+      if(packetId < 32) 
+      {
+            int rnd = rand() % 8;
+            packetList.push_back(*(new Packet(id, rnd, "To" + to_string(rnd))));
+            packetThreads.push_back(thread(&Packet::PacketRun, packetList.back()));
+      }
       packetGen.unlock();
 }
 
@@ -419,8 +489,9 @@ void Pc(int id)
 
       while (!endFlag)
       {
-            this_thread::sleep_for(chrono::milliseconds(10000));
+            this_thread::sleep_for(chrono::seconds(DELAY));
             GenerateNewPacket(id);
+            this_thread::sleep_for(chrono::seconds(10));
       }
 }
 
@@ -440,57 +511,59 @@ class Router
             PrintToConsole("Router " + to_string(_id) + " initialized");
             while (!endFlag)
             {
-                  pthread_mutex_lock(&routerMutex[_id]);
-                  PrintToConsole("Router " + to_string(_id) + " is sleeping");
-                  pthread_cond_wait(&routerCond[_id], &routerMutex[_id]);
-                  PrintToConsole("Router " + to_string(_id) + " awake");
+                  routerActive[_id] = false;
+                  this_thread::sleep_for(chrono::seconds(1));
+                  routerActive[_id] = true;
+                  this_thread::sleep_for(chrono::seconds(1));
                   while (buffer[_id].size() > 0)
                   {
-
-                        bufferMutex[_id].lock();
-                        Packet *packet = buffer[_id].front();
-                        buffer[_id].pop();
-
-                        bufferMutex[_id].unlock();
-                        if ((*packet)._position[2] == pc &&
-                            (*packet)._position[1] == red &&
-                            ((*packet)._position[1] == _host[0] ||
-                             (*packet)._position[1] == _host[1]))
+                        if (bufferMutex[_id].try_lock())
                         {
-                              if ((*packet)._destination == _host[0])
+                              int packetId = buffer[_id].front();
+                              buffer[_id].pop();
+                              bufferMutex[_id].unlock();
+                              routerPacketId[_id] = packetId;
+                              routerPacketMsg[_id] = packetList[packetId]._message;
+                              for(int i = 1; i < 10; i++)
                               {
-                                    // wyślij na host 0
-
-                                    (*packet)._position[2] = r;
-                                    (*packet)._position[1] = blue;
-                                    (*packet)._position[0] = _host[0];
+                                    routerProgress[_id] = i;
+                                    this_thread::sleep_for(chrono::milliseconds(DELAY*250));
                               }
-                              else if ((*packet)._destination == _host[1])
+                              routerProgress[_id] = 0;
+                              routerPacketId[_id] = 0;
+                              routerPacketMsg[_id] = "";
+                              if (packetList[packetId]._destination == _host[0])
                               {
-                                    // wyślij na host 1
+                                    packetPosition[packetId][2] = pc;
+                                    packetPosition[packetId][1] = blue;
+                                    packetPosition[packetId][0] = _host[0];
+                              }
+                              else if (packetList[packetId]._destination == _host[1])
+                              {
 
-                                    (*packet)._position[2] = r;
-                                    (*packet)._position[1] = blue;
-                                    (*packet)._position[0] = _host[1];
-                                    //mvprintw(2, 1, "test: %p", *packet);
+                                    packetPosition[packetId][2] = pc;
+                                    packetPosition[packetId][1] = blue;
+                                    packetPosition[packetId][0] = _host[1];
                               }
                               else
                               {
-                                    //wyślij w prawo
-                                    // usun
-                                    //packetGen.lock();
-                                    //auto it = find(packetThreads.begin(), packetThreads.end(), (*packet));
-                                    // if (it != packetThreads.end())
-                                    {
-                                          // packetThreads[distance(packetThreads.begin(),it)].join();
-                                          //     packetThreads.erase(it);
-                                    }
-                                    //packetGen.unlock();
+                                    packetPosition[packetId][2] = r;
+                                    packetPosition[packetId][1] = red;
+                                    packetPosition[packetId][0] = _id;
                               }
-                              //Send(*packet);
+                              if (Send(packetId, (to_string(packetId) + " " + packetList[packetId]._message)) == -1)
+                              {
+                                    PrintToConsole("Router " + to_string(_id) + " send failed " + to_string(packetId));
+                                    packetPosition[packetId][2] = lost;
+                              }
+                        }
+                        else
+                        {
+                              PrintToConsole("Router " + to_string(_id) + " couldn't access buffer");
+                              packetPosition[packetId][2] = lost;
                         }
                   }
-                  pthread_mutex_unlock(&routerMutex[_id]);
+                  routerActive[_id] = false;
             }
       }
 };
@@ -513,10 +586,10 @@ int main()
       PrintToConsole("SYSTEM: Starting Routers...");
       thread threadRouter[R];
       Router router[4] = {
-          Router(0, 0, 1),
-          Router(1, 2, 3),
-          Router(2, 4, 5),
-          Router(3, 6, 7),
+          Router(0, 7, 0),
+          Router(1, 1, 2),
+          Router(2, 3, 4),
+          Router(3, 5, 6),
       };
       for (int i = 0; i < R; i++)
       {
